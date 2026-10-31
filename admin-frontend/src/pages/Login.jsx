@@ -108,7 +108,7 @@ export const Login = () => {
                   setEmail(e.target.value);
                   if (fieldErrors.email) setFieldErrors((prev) => ({ ...prev, email: null }));
                 }}
-                placeholder="admin@brightloop.io"
+                placeholder="Enter your email"
                 className={`w-full pl-10 pr-4 py-2.5 bg-slate-900 border rounded-lg text-white text-sm focus:outline-none transition-colors ${
                   fieldErrors.email
                     ? 'border-rose-500 focus:border-rose-500 focus:ring-1 focus:ring-rose-500'

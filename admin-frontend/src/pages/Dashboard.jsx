@@ -15,6 +15,9 @@ import {
   TrendingUp,
   RefreshCw,
   FileText,
+  CreditCard,
+  Shield,
+  AlertCircle,
 } from 'lucide-react';
 import api from '../services/api';
 
@@ -34,19 +37,19 @@ const getFormattedDate = () => {
 export const Dashboard = () => {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [error, setError] = useState(null);
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.get('/reports/dashboard-metrics');
       if (res?.data) {
         setMetrics(res.data);
-        setIsBackendConnected(true);
       }
-    } catch {
+    } catch (err) {
+      setError(err?.message || 'Failed to connect to backend reports service.');
       setMetrics(null);
-      setIsBackendConnected(false);
     } finally {
       setLoading(false);
     }
@@ -122,7 +125,7 @@ export const Dashboard = () => {
               Brightloop Admin Console
             </h1>
             <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-              Real-time subscription billing lifecycle, live database revenues, customer directory, and invoicing analytics.
+              Live PostgreSQL database synchronization for recurring revenues, active subscriptions, customer accounts, and real-time activity.
             </p>
           </div>
 
@@ -131,7 +134,7 @@ export const Dashboard = () => {
               onClick={fetchMetrics}
               disabled={loading}
               className="p-2 border border-slate-200 bg-white rounded-lg hover:bg-slate-50 text-slate-600 transition shadow-xs disabled:opacity-50"
-              title="Refresh dashboard"
+              title="Refresh dashboard metrics"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
             </button>
@@ -159,6 +162,14 @@ export const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Backend Error Alert */}
+      {error && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start space-x-3">
+          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 font-medium">{error}</div>
+        </div>
+      )}
 
       {/* 4 Required KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -273,50 +284,86 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Recent Activity Section */}
+      {/* Recent Activity / Audit Stream */}
       <div className="bg-white rounded-xl border border-slate-200/90 p-6 shadow-xs">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base font-bold text-slate-900 tracking-tight">Recent Activity Stream</h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Live transactional events from subscriptions and recurring invoices
+              Live transactional events from subscriptions, invoices, and verified payments (Sorted newest first)
             </p>
           </div>
-          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            Audit Log
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 flex items-center space-x-1">
+            <Shield className="h-3 w-3" />
+            <span>Admin Audit Stream</span>
           </span>
         </div>
 
-        {metrics?.recentActivities?.length === 0 ? (
+        {loading ? (
+          <div className="py-12 text-center text-slate-400 text-xs">
+            <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-200 border-t-blue-600 mx-auto mb-2" />
+            <span>Synchronizing audit events from database...</span>
+          </div>
+        ) : !metrics?.recentActivities || metrics.recentActivities.length === 0 ? (
           <div className="py-12 px-4 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 text-center">
             <Activity className="h-8 w-8 text-slate-400 mx-auto mb-2" />
             <h3 className="text-sm font-semibold text-slate-700">No Recent Events</h3>
-            <p className="text-xs text-slate-400 mt-1">Events will populate as customers transact.</p>
+            <p className="text-xs text-slate-400 mt-1">Events will populate automatically as customers transact.</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100 text-xs">
-            {metrics?.recentActivities?.map((act) => (
-              <div key={act.id} className="py-3 flex items-center justify-between hover:bg-slate-50/60 px-2 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                    {act.type === 'SUBSCRIPTION' ? <Repeat className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <span className="font-semibold text-slate-900 block">{act.title}</span>
-                    <span className="text-slate-500">{act.description}</span>
-                  </div>
-                </div>
+            {metrics.recentActivities.map((act) => {
+              const isPayment = act.type === 'PAYMENT';
+              const isSub = act.type === 'SUBSCRIPTION';
 
-                <div className="text-right">
-                  {act.amount != null && (
-                    <span className="font-bold text-slate-900 block">${Number(act.amount).toFixed(2)}</span>
-                  )}
-                  <span className="text-[11px] text-slate-400">
-                    {new Date(act.date).toLocaleDateString()}
-                  </span>
+              return (
+                <div key={act.id} className="py-3 flex items-center justify-between hover:bg-slate-50/60 px-2 rounded-lg transition">
+                  <div className="flex items-center space-x-3">
+                    <div
+                      className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        isPayment
+                          ? 'bg-emerald-50 text-emerald-600'
+                          : isSub
+                          ? 'bg-blue-50 text-blue-600'
+                          : 'bg-purple-50 text-purple-600'
+                      }`}
+                    >
+                      {isPayment ? (
+                        <CreditCard className="h-4 w-4" />
+                      ) : isSub ? (
+                        <Repeat className="h-4 w-4" />
+                      ) : (
+                        <FileText className="h-4 w-4" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-semibold text-slate-900">{act.title}</span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${
+                            act.status === 'COMPLETED' || act.status === 'ACTIVE' || act.status === 'PAID'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          {act.status}
+                        </span>
+                      </div>
+                      <span className="text-slate-500 text-[11px] mt-0.5 block">{act.description}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    {act.amount != null && (
+                      <span className="font-bold text-slate-900 block">${Number(act.amount).toFixed(2)}</span>
+                    )}
+                    <span className="text-[11px] text-slate-400">
+                      {act.date ? new Date(act.date).toLocaleDateString() : '—'}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

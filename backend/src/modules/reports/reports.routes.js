@@ -5,7 +5,7 @@ import prisma from '../../config/db.js';
 
 const router = Router();
 
-// GET /api/reports/dashboard-metrics - Real KPI & Revenue Metrics
+// GET /api/reports/dashboard-metrics - Real KPI & Revenue Metrics from actual DB
 router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
   try {
     const now = new Date();
@@ -19,6 +19,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       invoicesAll,
       recentSubscriptions,
       recentInvoices,
+      recentPayments,
     ] = await Promise.all([
       // 1. Active Subscriptions
       prisma.subscription.count({ where: { status: 'ACTIVE' } }),
@@ -26,60 +27,92 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       prisma.customer.count({ where: { status: 'ACTIVE' } }),
       // 3. Invoices count
       prisma.invoice.count(),
-      // 4. Overdue invoices
+      // 4. Overdue invoices (must strictly be OVERDUE status)
       prisma.invoice.count({
         where: {
           status: 'OVERDUE',
         },
       }),
-      // 5. Total Revenue collected
+      // 5. Total Revenue collected - ONLY from COMPLETED payments
       prisma.payment.aggregate({
         where: { status: 'COMPLETED' },
         _sum: { amount: true },
       }),
-      // 6. Outstanding balance from unpaid / partial invoices
+      // 6. Outstanding balance: ONLY remaining unpaid invoice amounts, accounting for partial payments
+      // Statuses eligible: ISSUED, OVERDUE, PARTIALLY_PAID (exclude PAID, CANCELLED, VOID, DRAFT)
       prisma.invoice.findMany({
         where: {
           status: { in: ['ISSUED', 'OVERDUE', 'PARTIALLY_PAID'] },
         },
         select: {
-          balanceAmount: true,
+          id: true,
           totalAmount: true,
           paidAmount: true,
+          balanceAmount: true,
+          status: true,
         },
       }),
       // 7. Recent Subscriptions (for Activity feed)
       prisma.subscription.findMany({
-        take: 5,
+        take: 8,
         orderBy: { createdAt: 'desc' },
         include: {
           customer: { select: { name: true, email: true } },
         },
       }),
-      // 8. Recent Invoices
+      // 8. Recent Invoices (for Activity feed)
       prisma.invoice.findMany({
-        take: 5,
+        take: 8,
         orderBy: { issueDate: 'desc' },
+        include: {
+          customer: { select: { name: true, email: true } },
+        },
+      }),
+      // 9. Recent Payments (for Activity feed)
+      prisma.payment.findMany({
+        take: 8,
+        where: { status: 'COMPLETED' },
+        orderBy: { paidAt: 'desc' },
         include: {
           customer: { select: { name: true, email: true } },
         },
       }),
     ]);
 
-    // Financial calculations
+    // Financial calculation 1: Revenue Received = strictly completed payments
     const revenueReceived = Number(paymentsCompleted._sum.amount || 0);
+
+    // Financial calculation 2: Outstanding Balance = remaining unpaid invoice amounts accounting for partial payments
     const outstandingBalance = invoicesAll.reduce((sum, inv) => {
-      const bal = inv.balanceAmount != null ? Number(inv.balanceAmount) : (Number(inv.totalAmount) - Number(inv.paidAmount || 0));
-      return sum + Math.max(0, bal);
+      // If balanceAmount is explicitly tracked in DB, use it; otherwise totalAmount - paidAmount
+      const total = Number(inv.totalAmount || 0);
+      const paid = Number(inv.paidAmount || 0);
+      const remaining = inv.balanceAmount != null ? Number(inv.balanceAmount) : Math.max(0, total - paid);
+      return sum + Math.max(0, remaining);
     }, 0);
 
-    // Build recent activities feed
-    const activities = [
+    // Build unified Recent Activity / Audit Stream:
+    // Sorted newest first with unique deduplicated keys and real recorded database actions
+    const rawActivities = [
+      ...recentPayments.map((p) => ({
+        id: `pay-${p.id}`,
+        type: 'PAYMENT',
+        title: `Payment Received`,
+        reference: p.paymentNumber || p.id.slice(0, 8),
+        customerName: p.customer?.name || 'Customer',
+        description: `Verified collection of $${Number(p.amount).toFixed(2)} from ${p.customer?.name || 'Subscriber'}`,
+        status: p.status,
+        amount: Number(p.amount),
+        date: p.paidAt,
+      })),
       ...recentSubscriptions.map((s) => ({
         id: `sub-${s.id}`,
         type: 'SUBSCRIPTION',
         title: `Subscription ${s.subscriptionNumber || s.id.slice(0, 8)}`,
-        description: `Customer ${s.customer?.name || 'Subscriber'} (${s.status})`,
+        reference: s.subscriptionNumber || s.id.slice(0, 8),
+        customerName: s.customer?.name || 'Subscriber',
+        description: `Active recurring plan for ${s.customer?.name || 'Customer'} (${s.status})`,
+        status: s.status,
         amount: s.totalAmount != null ? Number(s.totalAmount) : null,
         date: s.createdAt,
       })),
@@ -87,11 +120,25 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
         id: `inv-${inv.id}`,
         type: 'INVOICE',
         title: `Invoice ${inv.invoiceNumber}`,
-        description: `Issued to ${inv.customer?.name || 'Customer'} (${inv.status})`,
+        reference: inv.invoiceNumber,
+        customerName: inv.customer?.name || 'Customer',
+        description: `Billing invoice issued to ${inv.customer?.name || 'Customer'} (${inv.status})`,
+        status: inv.status,
         amount: inv.totalAmount != null ? Number(inv.totalAmount) : null,
         date: inv.issueDate || inv.createdAt,
       })),
-    ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 8);
+    ];
+
+    // Deduplicate and sort newest first
+    const seenIds = new Set();
+    const activities = rawActivities
+      .filter((item) => {
+        if (seenIds.has(item.id)) return false;
+        seenIds.add(item.id);
+        return true;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 10);
 
     // Monthly revenue simulation/grouping
     const paymentsLast6Months = await prisma.payment.findMany({
@@ -145,7 +192,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
     return successResponse(res, 'Dashboard metrics retrieved', {
       activeSubscriptions: activeSubscriptionsCount,
       revenueReceived,
-      totalRevenue: revenueReceived, // Alias
+      totalRevenue: revenueReceived,
       outstandingBalance,
       overdueInvoices: overdueInvoicesCount,
       totalCustomers: totalCustomersCount,
@@ -200,7 +247,10 @@ router.get('/summary', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), asyn
     const totalBilled = invoices.reduce((sum, inv) => sum + Number(inv.totalAmount), 0);
     const totalOutstanding = invoices
       .filter((inv) => ['ISSUED', 'OVERDUE', 'PARTIALLY_PAID'].includes(inv.status))
-      .reduce((sum, inv) => sum + Number(inv.balanceAmount || inv.totalAmount), 0);
+      .reduce((sum, inv) => {
+        const bal = inv.balanceAmount != null ? Number(inv.balanceAmount) : (Number(inv.totalAmount) - Number(inv.paidAmount || 0));
+        return sum + Math.max(0, bal);
+      }, 0);
     const overdueCount = invoices.filter((inv) => inv.status === 'OVERDUE').length;
 
     return successResponse(res, 'Report summary retrieved successfully', {
