@@ -87,6 +87,24 @@ router.post('/', authenticateToken, async (req, res, next) => {
     const paymentNumber = `PAY-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
     const isCustomer = req.user.role === 'CUSTOMER';
 
+    // Prevent duplicate pending payment submissions for the same invoice
+    if (isCustomer) {
+      const existingPending = await prisma.payment.findFirst({
+        where: {
+          invoiceId: invoice.id,
+          status: 'PENDING',
+        },
+      });
+      if (existingPending) {
+        return errorResponse(
+          res,
+          `A payment notification (${existingPending.paymentNumber}) is already pending verification for this invoice. Only one submission is allowed at a time.`,
+          [],
+          400
+        );
+      }
+    }
+
     // If submitted by CUSTOMER: Record as PENDING verification without modifying invoice balance
     if (isCustomer) {
       const payment = await prisma.payment.create({
