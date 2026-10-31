@@ -1,10 +1,12 @@
 import { Router } from 'express';
-import { authenticateToken } from '../../middleware/auth.middleware.js';
+import { authenticateToken, authorizeRoles } from '../../middleware/auth.middleware.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import prisma from '../../config/db.js';
+import { subscriptionsService } from './subscriptions.service.js';
 
 const router = Router();
 
+// GET all subscriptions (role-aware: customers see their own, staff/admin see all)
 router.get('/', authenticateToken, async (req, res, next) => {
   try {
     const where = {};
@@ -21,13 +23,14 @@ router.get('/', authenticateToken, async (req, res, next) => {
       },
       orderBy: { createdAt: 'desc' },
     });
+
     return successResponse(res, 'Subscriptions retrieved successfully', { subscriptions });
   } catch (err) {
     next(err);
   }
 });
 
-// Get Subscription detail with customer ownership verification
+// GET subscription detail by ID (with customer ownership verification)
 router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
     const subscription = await prisma.subscription.findUnique({
@@ -74,5 +77,36 @@ router.get('/:id', authenticateToken, async (req, res, next) => {
   }
 });
 
-export default router;
+// POST convert quotation to subscription
+router.post('/convert/:quotationId', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
+  try {
+    const subscription = await subscriptionsService.convertFromQuotation(req.params.quotationId, req.user);
+    return successResponse(res, 'Quotation converted into active subscription successfully', { subscription }, 201);
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
 
+// POST direct subscription creation
+router.post('/', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
+  try {
+    const subscription = await subscriptionsService.createSubscription(req.body);
+    return successResponse(res, 'Subscription created successfully', { subscription }, 201);
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
+
+// POST lifecycle action (e.g., /api/subscriptions/:id/pause, resume, renew, cancel)
+router.post('/:id/:action', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
+  try {
+    const { action } = req.params;
+    const { reason } = req.body;
+    const subscription = await subscriptionsService.updateStatus(req.params.id, action, req.user, reason);
+    return successResponse(res, `Subscription ${action} action applied successfully`, { subscription });
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
+
+export default router;
