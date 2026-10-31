@@ -1,18 +1,3 @@
-<<<<<<< Updated upstream
-
-import { Dashboard } from './pages/Dashboard';
-import './App.css';
-
-function App() {
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <Dashboard />
-    </div>
-  );
-}
-
-export default App;
-=======
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
@@ -31,34 +16,46 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          {/* Protected Admin Routes */}
+          {/* Protected Admin Routes within AdminLayout */}
           <Route element={<ProtectedRoute />}>
             <Route element={<AdminLayout />}>
+              {/* 1. Dashboard */}
               <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Navigate to="/" replace />} />
+
+              {/* 2. Staff Management */}
               <Route
-                path="/users"
+                path="/staff"
                 element={
                   <ModulePage
-                    title="Users Management"
+                    title="Staff Management"
                     endpoint="/users"
-                    description="Manage platform administrative and staff users."
+                    description="Manage platform administrative and support staff accounts, credentials, and roles."
+                    actionLabel="Add Staff Member"
                     columns={[
+                      {
+                        header: 'Staff Name',
+                        render: (r) => `${r.firstName || ''} ${r.lastName || ''}`.trim() || r.name || '—',
+                      },
                       { header: 'Email', accessor: 'email' },
-                      { header: 'First Name', accessor: 'firstName' },
-                      { header: 'Last Name', accessor: 'lastName' },
                       { header: 'Role', accessor: 'role' },
                       { header: 'Status', accessor: 'status' },
                     ]}
                   />
                 }
               />
+              {/* Backward compatibility alias */}
+              <Route path="/users" element={<Navigate to="/staff" replace />} />
+
+              {/* 3. Customers */}
               <Route
                 path="/customers"
                 element={
                   <ModulePage
                     title="Customers"
                     endpoint="/customers"
-                    description="View and manage corporate and individual customer accounts."
+                    description="Manage enterprise, business, and individual subscriber profiles and billing contacts."
+                    actionLabel="Onboard Customer"
                     columns={[
                       { header: 'Name', accessor: 'name' },
                       { header: 'Company', accessor: 'companyName' },
@@ -69,83 +66,81 @@ export default function App() {
                   />
                 }
               />
+
+              {/* 4. Products */}
               <Route
                 path="/products"
                 element={
                   <ModulePage
                     title="Products"
                     endpoint="/products"
-                    description="Manage software catalog products and subscriptions."
+                    description="Configure software applications, catalog editions, and recurring add-on modules."
+                    actionLabel="Create Product"
                     columns={[
-                      { header: 'Name', accessor: 'name' },
-                      { header: 'Code', accessor: 'code' },
+                      { header: 'Product Name', accessor: 'name' },
+                      { header: 'Product Code', accessor: 'code' },
                       { header: 'Category', accessor: 'category' },
                       { header: 'Active', render: (r) => (r.active ? 'Yes' : 'No') },
                     ]}
                   />
                 }
               />
+
+              {/* 5. Plans */}
               <Route
                 path="/plans"
                 element={
                   <ModulePage
-                    title="Subscription Plans"
+                    title="Plans"
                     endpoint="/plans"
-                    description="Configure pricing tiers, billing cycles, and trial periods."
+                    description="Define recurring subscription tiers, billing cycles (monthly, yearly), and pricing rules."
+                    actionLabel="Create Plan"
                     columns={[
                       { header: 'Plan Name', accessor: 'name' },
-                      { header: 'Code', accessor: 'code' },
-                      { header: 'Cycle', accessor: 'billingCycle' },
-                      { header: 'Price', render: (r) => `$${r.price} ${r.currency || 'USD'}` },
+                      { header: 'Plan Code', accessor: 'code' },
+                      { header: 'Billing Cycle', accessor: 'billingCycle' },
+                      {
+                        header: 'Price',
+                        render: (r) => (r.price != null ? `$${r.price} ${r.currency || 'USD'}` : '—'),
+                      },
                       { header: 'Trial Days', accessor: 'trialDays' },
                     ]}
                   />
                 }
               />
+
+              {/* 6. Taxes */}
               <Route
-                path="/quotations"
+                path="/taxes"
                 element={
                   <ModulePage
-                    title="Quotations"
-                    endpoint="/quotations"
-                    description="Review, send, and convert quotations to active subscriptions."
+                    title="Taxes"
+                    endpoint="/taxes"
+                    description="Manage regional tax rates, GST/VAT percentage schedules, and invoicing compliance rules."
+                    actionLabel="New Tax Rule"
                     columns={[
-                      { header: 'Quote #', accessor: 'quotationNumber' },
-                      { header: 'Customer', render: (r) => r.customer?.name || '—' },
+                      { header: 'Tax Name', accessor: 'name' },
+                      { header: 'Rate (%)', render: (r) => (r.rate != null ? `${r.rate}%` : '—') },
+                      { header: 'Jurisdiction / Country', accessor: 'country' },
+                      { header: 'Type', accessor: 'type' },
                       { header: 'Status', accessor: 'status' },
-                      { header: 'Total', render: (r) => `$${r.totalAmount}` },
-                      { header: 'Valid Until', render: (r) => new Date(r.validUntil).toLocaleDateString() },
                     ]}
                   />
                 }
               />
-              <Route
-                path="/subscriptions"
-                element={
-                  <ModulePage
-                    title="Subscriptions"
-                    endpoint="/subscriptions"
-                    description="Track active recurring subscriptions and renewals."
-                    columns={[
-                      { header: 'Sub #', accessor: 'subscriptionNumber' },
-                      { header: 'Customer', render: (r) => r.customer?.name || '—' },
-                      { header: 'Status', accessor: 'status' },
-                      { header: 'Period End', render: (r) => new Date(r.currentPeriodEnd).toLocaleDateString() },
-                      { header: 'Amount', render: (r) => `$${r.totalAmount}` },
-                    ]}
-                  />
-                }
-              />
+
+              {/* 7. Discounts */}
               <Route
                 path="/discounts"
                 element={
                   <ModulePage
-                    title="Discounts & Coupons"
+                    title="Discounts"
                     endpoint="/discounts"
-                    description="Manage promotional codes, rate deductions, and limits."
+                    description="Manage promotional coupons, partner discount codes, and rate deduction policies."
+                    actionLabel="Create Discount"
                     columns={[
-                      { header: 'Code', accessor: 'code' },
-                      { header: 'Name', accessor: 'name' },
+                      { header: 'Coupon Code', accessor: 'code' },
+                      { header: 'Discount Name', accessor: 'name' },
                       { header: 'Type', accessor: 'type' },
                       { header: 'Value', accessor: 'value' },
                       { header: 'Active', render: (r) => (r.active ? 'Yes' : 'No') },
@@ -153,84 +148,32 @@ export default function App() {
                   />
                 }
               />
-              <Route
-                path="/invoices"
-                element={
-                  <ModulePage
-                    title="Invoices"
-                    endpoint="/invoices"
-                    description="Automated billing records and recurring invoices."
-                    columns={[
-                      { header: 'Invoice #', accessor: 'invoiceNumber' },
-                      { header: 'Customer', render: (r) => r.customer?.name || '—' },
-                      { header: 'Status', accessor: 'status' },
-                      { header: 'Total', render: (r) => `$${r.totalAmount}` },
-                      { header: 'Due Date', render: (r) => new Date(r.dueDate).toLocaleDateString() },
-                    ]}
-                  />
-                }
-              />
-              <Route
-                path="/payments"
-                element={
-                  <ModulePage
-                    title="Payments"
-                    endpoint="/payments"
-                    description="Customer payment transactions and allocations."
-                    columns={[
-                      { header: 'Payment #', accessor: 'paymentNumber' },
-                      { header: 'Customer', render: (r) => r.customer?.name || '—' },
-                      { header: 'Method', accessor: 'paymentMethod' },
-                      { header: 'Status', accessor: 'status' },
-                      { header: 'Amount', render: (r) => `$${r.amount}` },
-                    ]}
-                  />
-                }
-              />
+
+              {/* 8. Reports */}
               <Route
                 path="/reports"
                 element={
                   <ModulePage
-                    title="Reports & Analytics"
+                    title="Reports"
                     endpoint="/reports/dashboard-metrics"
-                    description="Comprehensive financial reporting and system metrics."
+                    description="View recurring revenue summaries, churn rates, invoice collections, and executive metrics."
+                    actionLabel="Generate Report"
                     columns={[
-                      { header: 'Metric', accessor: 'key' },
-                      { header: 'Value', accessor: 'value' },
+                      { header: 'Report Name', accessor: 'name' },
+                      { header: 'Metric Category', accessor: 'category' },
+                      { header: 'Billing Period', accessor: 'period' },
+                      { header: 'Status', accessor: 'status' },
                     ]}
                   />
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm max-w-2xl">
-                    <h2 className="text-lg font-bold text-slate-900 mb-2">System Settings</h2>
-                    <p className="text-sm text-slate-500 mb-6">Configure platform parameters and email notifications.</p>
-                    <div className="space-y-4 text-sm">
-                      <div className="flex justify-between items-center py-2 border-b">
-                        <span className="text-slate-600 font-medium">Automatic Invoicing Cron</span>
-                        <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded">Active (Daily at midnight)</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2 border-b">
-                        <span className="text-slate-600 font-medium">Email Dispatcher</span>
-                        <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded">Nodemailer Ready</span>
-                      </div>
-                      <div className="flex justify-between items-center py-2">
-                        <span className="text-slate-600 font-medium">PDF Invoice Engine</span>
-                        <span className="px-2 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded">PDFKit Enabled</span>
-                      </div>
-                    </div>
-                  </div>
                 }
               />
             </Route>
           </Route>
 
+          {/* Catch-all redirect to Dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
   );
 }
->>>>>>> Stashed changes
