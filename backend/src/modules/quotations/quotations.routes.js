@@ -120,8 +120,13 @@ router.post('/:id/accept', authenticateToken, async (req, res, next) => {
       }
     }
 
-    if (quotation.status === 'ACCEPTED' || quotation.status === 'CONVERTED') {
-      return errorResponse(res, `Quotation is already ${quotation.status.toLowerCase()}`, [], 400);
+    if (quotation.status !== 'SENT') {
+      return errorResponse(
+        res,
+        `Quotation cannot be accepted because it is currently ${quotation.status}. Only quotations sent by staff can be accepted.`,
+        [],
+        400
+      );
     }
 
     const updated = await prisma.quotation.update({

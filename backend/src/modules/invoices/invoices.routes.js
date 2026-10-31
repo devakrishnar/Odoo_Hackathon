@@ -29,6 +29,90 @@ router.get('/', authenticateToken, async (req, res, next) => {
   }
 });
 
+// Generate invoice for a subscription (Step 5 of hackathon workflow)
+router.post('/generate', authenticateToken, async (req, res, next) => {
+  try {
+    const { subscriptionId } = req.body;
+    if (!subscriptionId) {
+      return errorResponse(res, 'subscriptionId is required to generate invoice', [], 400);
+    }
+
+    const sub = await prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: {
+        customer: true,
+        items: { include: { plan: { include: { product: true } } } },
+      },
+    });
+
+    if (!sub) {
+      return errorResponse(res, 'Subscription not found', [], 404);
+    }
+
+    if (req.user.role === 'CUSTOMER') {
+      const customer = await prisma.customer.findFirst({ where: { userId: req.user.id } });
+      if (!customer || sub.customerId !== customer.id) {
+        return errorResponse(res, 'Forbidden: You cannot generate invoices for another customer.', [], 403);
+      }
+    }
+
+    // Check for existing invoice for this period (Idempotency requirement)
+    const existing = await prisma.invoice.findFirst({
+      where: {
+        subscriptionId: sub.id,
+        billingPeriodStart: sub.currentPeriodStart,
+        billingPeriodEnd: sub.currentPeriodEnd,
+      },
+    });
+
+    if (existing) {
+      return successResponse(res, 'Invoice already exists for this billing period', { invoice: existing });
+    }
+
+    const invoiceNumber = `INV-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const dueDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+
+    const invoice = await prisma.invoice.create({
+      data: {
+        invoiceNumber,
+        customerId: sub.customerId,
+        subscriptionId: sub.id,
+        status: 'ISSUED',
+        issueDate: new Date(),
+        dueDate,
+        billingPeriodStart: sub.currentPeriodStart,
+        billingPeriodEnd: sub.currentPeriodEnd,
+        subtotal: sub.totalAmount,
+        taxAmount: 0.0,
+        discountAmount: 0.0,
+        totalAmount: sub.totalAmount,
+        paidAmount: 0.0,
+        balanceAmount: sub.totalAmount,
+        currency: sub.currency,
+        notes: `Billing cycle invoice for subscription ${sub.subscriptionNumber}`,
+        items: {
+          create: sub.items.map((item) => ({
+            planId: item.planId,
+            description: `${item.plan?.product?.name || 'Product'} - ${item.plan?.name || 'Subscription Plan'}`,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+          })),
+        },
+      },
+      include: {
+        items: true,
+        customer: true,
+      },
+    });
+
+    return successResponse(res, 'Invoice generated successfully', { invoice }, 201);
+  } catch (err) {
+    next(err);
+  }
+});
+
+
 // Get Invoice Detail with ownership check
 router.get('/:id', authenticateToken, async (req, res, next) => {
   try {
