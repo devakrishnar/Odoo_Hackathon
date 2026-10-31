@@ -1,5 +1,6 @@
 import app from './app.js';
 import { config } from './config/env.js';
+import { initBillingJob } from './jobs/billing.job.js';
 
 const server = app.listen(config.port, () => {
   console.log(`====================================================`);
@@ -8,6 +9,8 @@ const server = app.listen(config.port, () => {
   console.log(` Health check: http://localhost:${config.port}/api/health`);
   console.log(` Origins     : ${config.corsOrigins.join(', ')}`);
   console.log(`====================================================`);
+
+  initBillingJob();
 });
 
 const gracefulShutdown = () => {

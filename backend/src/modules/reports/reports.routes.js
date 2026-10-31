@@ -2,23 +2,29 @@ import { Router } from 'express';
 import { authenticateToken, authorizeRoles } from '../../middleware/auth.middleware.js';
 import { successResponse } from '../../utils/response.js';
 import prisma from '../../config/db.js';
+import { addDays } from 'date-fns';
 
 const router = Router();
 
-// GET /api/reports/dashboard-metrics - Real KPI & Revenue Metrics
+// GET /api/reports/dashboard-metrics - Comprehensive Operational & Executive KPIs
 router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
   try {
     const now = new Date();
+    const sevenDaysFromNow = addDays(now, 7);
 
     const [
       activeSubscriptionsCount,
       totalCustomersCount,
       totalInvoicesCount,
-      overdueInvoicesCount,
       paymentsCompleted,
       invoicesAll,
       recentSubscriptions,
       recentInvoices,
+      recentPayments,
+      attentionSubscriptionsCount,
+      dueSoonInvoices,
+      overdueInvoicesList,
+      pendingQuotations,
     ] = await Promise.all([
       // 1. Active Subscriptions
       prisma.subscription.count({ where: { status: 'ACTIVE' } }),
@@ -26,21 +32,16 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       prisma.customer.count({ where: { status: 'ACTIVE' } }),
       // 3. Invoices count
       prisma.invoice.count(),
-      // 4. Overdue invoices
-      prisma.invoice.count({
-        where: {
-          status: 'OVERDUE',
-        },
-      }),
-      // 5. Total Revenue collected
+      // 4. Total Revenue collected
       prisma.payment.aggregate({
         where: { status: 'COMPLETED' },
         _sum: { amount: true },
       }),
-      // 6. Outstanding balance from unpaid / partial invoices
+      // 5. Invoices for outstanding balance
       prisma.invoice.findMany({
         where: {
-          status: { in: ['ISSUED', 'OVERDUE', 'PARTIALLY_PAID'] },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED'] },
         },
         select: {
           balanceAmount: true,
@@ -48,7 +49,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
           paidAmount: true,
         },
       }),
-      // 7. Recent Subscriptions (for Activity feed)
+      // 6. Recent Subscriptions (for Activity feed)
       prisma.subscription.findMany({
         take: 5,
         orderBy: { createdAt: 'desc' },
@@ -56,13 +57,57 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
           customer: { select: { name: true, email: true } },
         },
       }),
-      // 8. Recent Invoices
+      // 7. Recent Invoices
       prisma.invoice.findMany({
         take: 5,
         orderBy: { issueDate: 'desc' },
         include: {
           customer: { select: { name: true, email: true } },
         },
+      }),
+      // 8. Recent 5 payments
+      prisma.payment.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          customer: true,
+          invoice: { select: { invoiceNumber: true } },
+        },
+      }),
+      // 9. Subscriptions needing attention (e.g. expiring within 7 days or paused)
+      prisma.subscription.count({
+        where: {
+          OR: [
+            { status: 'PAUSED' },
+            {
+              status: 'ACTIVE',
+              currentPeriodEnd: { lte: sevenDaysFromNow },
+            },
+          ],
+        },
+      }),
+      // 10. Invoices due in the next 7 days
+      prisma.invoice.count({
+        where: {
+          dueDate: { gte: now, lte: sevenDaysFromNow },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED'] },
+        },
+      }),
+      // 11. Overdue invoices list
+      prisma.invoice.findMany({
+        where: {
+          dueDate: { lt: now },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED'] },
+        },
+        include: { customer: true },
+        take: 5,
+        orderBy: { dueDate: 'asc' },
+      }),
+      // 12. Pending quotations
+      prisma.quotation.count({
+        where: { status: { in: ['DRAFT', 'SENT'] } },
       }),
     ]);
 
@@ -97,11 +142,11 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
     const paymentsLast6Months = await prisma.payment.findMany({
       where: {
         status: 'COMPLETED',
-        paidAt: {
+        createdAt: {
           gte: new Date(now.getFullYear(), now.getMonth() - 5, 1),
         },
       },
-      select: { amount: true, paidAt: true },
+      select: { amount: true, createdAt: true },
     });
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -113,7 +158,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
     }
 
     paymentsLast6Months.forEach((p) => {
-      const d = new Date(p.paidAt);
+      const d = new Date(p.createdAt);
       const key = `${monthNames[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`;
       if (monthlyMap[key] !== undefined) {
         monthlyMap[key] += Number(p.amount);
@@ -145,14 +190,20 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
     return successResponse(res, 'Dashboard metrics retrieved', {
       activeSubscriptions: activeSubscriptionsCount,
       revenueReceived,
-      totalRevenue: revenueReceived, // Alias
+      totalRevenue: revenueReceived,
       outstandingBalance,
-      overdueInvoices: overdueInvoicesCount,
+      overdueInvoices: overdueInvoicesList.length,
+      overdueInvoicesCount: overdueInvoicesList.length,
+      overdueInvoicesList,
+      dueSoonInvoicesCount: dueSoonInvoices,
+      attentionSubscriptionsCount,
+      pendingQuotationsCount: pendingQuotations,
       totalCustomers: totalCustomersCount,
       totalInvoices: totalInvoicesCount,
       monthlyRevenue,
       subscriptionStatusCounts,
       recentActivities: activities,
+      recentPayments,
     });
   } catch (err) {
     next(err);
@@ -189,10 +240,10 @@ router.get('/summary', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), asyn
       prisma.payment.findMany({
         where: {
           status: 'COMPLETED',
-          ...(startDate || endDate ? { paidAt: dateFilter } : {}),
+          ...(startDate || endDate ? { createdAt: dateFilter } : {}),
         },
         include: { customer: { select: { name: true, email: true } } },
-        orderBy: { paidAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
       }),
     ]);
 
