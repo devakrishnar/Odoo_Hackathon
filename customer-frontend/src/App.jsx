@@ -1,122 +1,84 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider } from './context/AuthContext';
+import { ProtectedRoute } from './routes/ProtectedRoute';
+import { CustomerLayout } from './layouts/CustomerLayout';
+import { Login } from './pages/Login';
+import { Dashboard } from './pages/Dashboard';
+import { Profile } from './pages/Profile';
+import { Support } from './pages/Support';
+import { ModulePage } from './pages/ModulePage';
 
-function App() {
-  const [count, setCount] = useState(0)
-
+export default function App() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <AuthProvider>
+      <BrowserRouter>
+        <Toaster position="top-right" />
+        <Routes>
+          <Route path="/login" element={<Login />} />
 
-      <div className="ticks"></div>
+          {/* Protected Customer Routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<CustomerLayout />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route
+                path="/subscriptions"
+                element={
+                  <ModulePage
+                    title="My Subscriptions"
+                    endpoint="/subscriptions"
+                    description="View active license plans and renewals."
+                    columns={[
+                      { header: 'Subscription #', accessor: 'subscriptionNumber' },
+                      { header: 'Status', accessor: 'status' },
+                      { header: 'Renewal Date', render: (r) => new Date(r.currentPeriodEnd).toLocaleDateString() },
+                      { header: 'Amount', render: (r) => `$${r.totalAmount}` },
+                    ]}
+                  />
+                }
+              />
+              <Route
+                path="/invoices"
+                element={
+                  <ModulePage
+                    title="My Invoices"
+                    endpoint="/invoices"
+                    description="View and download tax-compliant billing invoices."
+                    columns={[
+                      { header: 'Invoice #', accessor: 'invoiceNumber' },
+                      { header: 'Date', render: (r) => new Date(r.issueDate).toLocaleDateString() },
+                      { header: 'Status', accessor: 'status' },
+                      { header: 'Amount', render: (r) => `$${r.totalAmount}` },
+                    ]}
+                  />
+                }
+              />
+              <Route
+                path="/payments"
+                element={
+                  <ModulePage
+                    title="Payment History"
+                    endpoint="/payments"
+                    description="Track previous receipts and settlements."
+                    columns={[
+                      { header: 'Payment #', accessor: 'paymentNumber' },
+                      { header: 'Date', render: (r) => new Date(r.paidAt).toLocaleDateString() },
+                      { header: 'Method', accessor: 'paymentMethod' },
+                      { header: 'Status', accessor: 'status' },
+                      { header: 'Amount', render: (r) => `$${r.amount}` },
+                    ]}
+                  />
+                }
+              />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/support" element={<Support />} />
+            </Route>
+          </Route>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }
-
-export default App
