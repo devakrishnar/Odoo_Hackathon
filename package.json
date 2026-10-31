@@ -1,0 +1,22 @@
+{
+  "name": "brightloop-subscription-system",
+  "version": "1.0.0",
+  "description": "Brightloop Software Subscription Management System - Monorepo with 3 Frontends and 1 Shared Backend",
+  "private": true,
+  "scripts": {
+    "install:backend": "npm --prefix backend install",
+    "install:admin": "npm --prefix admin-frontend install",
+    "install:staff": "npm --prefix staff-frontend install",
+    "install:customer": "npm --prefix customer-frontend install",
+    "install:all": "npm run install:backend && npm run install:admin && npm run install:staff && npm run install:customer",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:admin": "npm --prefix admin-frontend run dev",
+    "dev:staff": "npm --prefix staff-frontend run dev",
+    "dev:customer": "npm --prefix customer-frontend run dev",
+    "build:all": "npm --prefix admin-frontend run build && npm --prefix staff-frontend run build && npm --prefix customer-frontend run build"
+  },
+  "dependencies": {
+    "@neon/config": "^1.10.0",
+    "@neon/env": "^1.6.8"
+  }
+}
