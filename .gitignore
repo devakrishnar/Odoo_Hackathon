@@ -39,3 +39,4 @@ Thumbs.db
 # Generated / Prisma
 *.sqlite
 *.sqlite3
+.neon
