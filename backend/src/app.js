@@ -17,6 +17,7 @@ import discountsRoutes from './modules/discounts/discounts.routes.js';
 import invoicesRoutes from './modules/invoices/invoices.routes.js';
 import paymentsRoutes from './modules/payments/payments.routes.js';
 import reportsRoutes from './modules/reports/reports.routes.js';
+import taxesRoutes from './modules/taxes/taxes.routes.js';
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use('/api/discounts', discountsRoutes);
 app.use('/api/invoices', invoicesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/taxes', taxesRoutes);
 
 // 404 Route Handler
 app.use((req, res) => {
