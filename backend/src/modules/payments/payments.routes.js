@@ -1,10 +1,12 @@
 import { Router } from 'express';
-import { authenticateToken } from '../../middleware/auth.middleware.js';
+import { authenticateToken, authorizeRoles } from '../../middleware/auth.middleware.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import prisma from '../../config/db.js';
+import { paymentsService } from './payments.service.js';
 
 const router = Router();
 
+// GET all payments (role-aware: customers see their own, staff/admin see all)
 router.get('/', authenticateToken, async (req, res, next) => {
   try {
     const where = {};
@@ -29,13 +31,14 @@ router.get('/', authenticateToken, async (req, res, next) => {
       },
       orderBy: { createdAt: 'desc' },
     });
+
     return successResponse(res, 'Payments retrieved successfully', { payments });
   } catch (err) {
     next(err);
   }
 });
 
-// Record a payment against an invoice with ownership validation
+// POST / — Record a payment against an invoice (all authenticated roles; customers validated for ownership)
 router.post('/', authenticateToken, async (req, res, next) => {
   try {
     const { invoiceId, amount, paymentMethod = 'CREDIT_CARD', notes, transactionReference } = req.body;
@@ -59,7 +62,7 @@ router.post('/', authenticateToken, async (req, res, next) => {
       return errorResponse(res, 'Invoice not found', [], 404);
     }
 
-    // If role is CUSTOMER, ensure customer owns this invoice
+    // Customers can only pay their own invoices
     if (req.user.role === 'CUSTOMER') {
       const customer = await prisma.customer.findFirst({ where: { userId: req.user.id } });
       if (!customer || invoice.customerId !== customer.id) {
@@ -278,4 +281,3 @@ router.post('/:id/reject', authenticateToken, async (req, res, next) => {
 });
 
 export default router;
-
