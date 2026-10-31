@@ -286,7 +286,8 @@ export const Subscriptions = () => {
                 <tbody className="divide-y divide-slate-800/60">
                   {quotations.map((quote) => {
                     const plan = quote.items?.[0]?.plan || {};
-                    const isDraft = quote.status === 'DRAFT' || quote.status === 'SENT';
+                    const isSent = quote.status === 'SENT';
+                    const isDraft = quote.status === 'DRAFT';
 
                     return (
                       <tr key={quote.id} className="hover:bg-slate-800/40 transition">
@@ -312,14 +313,16 @@ export const Subscriptions = () => {
                                 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/40'
                                 : quote.status === 'CONVERTED'
                                 ? 'bg-indigo-950 text-indigo-400 border border-indigo-800/40'
+                                : quote.status === 'SENT'
+                                ? 'bg-blue-950 text-blue-400 border border-blue-800/40'
                                 : 'bg-amber-950 text-amber-400 border border-amber-800/40'
                             }`}
                           >
-                            {quote.status}
+                            {isDraft ? 'Pending Review' : quote.status}
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          {isDraft ? (
+                          {isSent ? (
                             <button
                               disabled={actionLoading}
                               onClick={() => handleAcceptQuotation(quote.id)}
@@ -327,6 +330,11 @@ export const Subscriptions = () => {
                             >
                               Accept Quotation
                             </button>
+                          ) : isDraft ? (
+                            <span className="text-amber-400/90 text-xs inline-flex items-center space-x-1.5 font-medium">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>Pending Staff Review</span>
+                            </span>
                           ) : (
                             <span className="text-slate-500 text-xs italic">
                               {quote.status === 'ACCEPTED' ? 'Pending Staff Activation' : 'Converted to Subscription'}

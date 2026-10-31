@@ -2,13 +2,15 @@ import { Router } from 'express';
 import { authenticateToken, authorizeRoles } from '../../middleware/auth.middleware.js';
 import { successResponse } from '../../utils/response.js';
 import prisma from '../../config/db.js';
+import { addDays } from 'date-fns';
 
 const router = Router();
 
-// GET /api/reports/dashboard-metrics - Real KPI & Revenue Metrics from actual DB
+// GET /api/reports/dashboard-metrics - Comprehensive Real DB Metrics for Admin & Staff
 router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
   try {
     const now = new Date();
+    const sevenDaysFromNow = addDays(now, 7);
 
     const [
       activeSubscriptionsCount,
@@ -20,6 +22,10 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       recentSubscriptions,
       recentInvoices,
       recentPayments,
+      attentionSubscriptionsCount,
+      dueSoonInvoices,
+      overdueInvoicesList,
+      pendingQuotations,
     ] = await Promise.all([
       // 1. Active Subscriptions
       prisma.subscription.count({ where: { status: 'ACTIVE' } }),
@@ -27,10 +33,17 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       prisma.customer.count({ where: { status: 'ACTIVE' } }),
       // 3. Invoices count
       prisma.invoice.count(),
-      // 4. Overdue invoices (must strictly be OVERDUE status)
+      // 4. Overdue invoices (either status OVERDUE or dueDate < now with balance > 0)
       prisma.invoice.count({
         where: {
-          status: 'OVERDUE',
+          OR: [
+            { status: 'OVERDUE' },
+            {
+              dueDate: { lt: now },
+              balanceAmount: { gt: 0 },
+              status: { notIn: ['PAID', 'CANCELLED'] },
+            },
+          ],
         },
       }),
       // 5. Total Revenue collected - ONLY from COMPLETED payments
@@ -38,11 +51,11 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
         where: { status: 'COMPLETED' },
         _sum: { amount: true },
       }),
-      // 6. Outstanding balance: ONLY remaining unpaid invoice amounts, accounting for partial payments
-      // Statuses eligible: ISSUED, OVERDUE, PARTIALLY_PAID (exclude PAID, CANCELLED, VOID, DRAFT)
+      // 6. Invoices for outstanding balance - ONLY remaining unpaid invoice amounts accounting for partial payments
       prisma.invoice.findMany({
         where: {
-          status: { in: ['ISSUED', 'OVERDUE', 'PARTIALLY_PAID'] },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED', 'VOID', 'DRAFT'] },
         },
         select: {
           id: true,
@@ -52,7 +65,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
           status: true,
         },
       }),
-      // 7. Recent Subscriptions (for Activity feed)
+      // 7. Recent Subscriptions
       prisma.subscription.findMany({
         take: 8,
         orderBy: { createdAt: 'desc' },
@@ -60,7 +73,7 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
           customer: { select: { name: true, email: true } },
         },
       }),
-      // 8. Recent Invoices (for Activity feed)
+      // 8. Recent Invoices
       prisma.invoice.findMany({
         take: 8,
         orderBy: { issueDate: 'desc' },
@@ -68,14 +81,50 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
           customer: { select: { name: true, email: true } },
         },
       }),
-      // 9. Recent Payments (for Activity feed)
+      // 9. Recent Payments
       prisma.payment.findMany({
         take: 8,
         where: { status: 'COMPLETED' },
         orderBy: { paidAt: 'desc' },
         include: {
           customer: { select: { name: true, email: true } },
+          invoice: { select: { invoiceNumber: true } },
         },
+      }),
+      // 10. Subscriptions needing attention (e.g. expiring within 7 days or paused)
+      prisma.subscription.count({
+        where: {
+          OR: [
+            { status: 'PAUSED' },
+            {
+              status: 'ACTIVE',
+              currentPeriodEnd: { lte: sevenDaysFromNow },
+            },
+          ],
+        },
+      }),
+      // 11. Invoices due in next 7 days
+      prisma.invoice.count({
+        where: {
+          dueDate: { gte: now, lte: sevenDaysFromNow },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED'] },
+        },
+      }),
+      // 12. Overdue invoices list
+      prisma.invoice.findMany({
+        where: {
+          dueDate: { lt: now },
+          balanceAmount: { gt: 0 },
+          status: { notIn: ['PAID', 'CANCELLED'] },
+        },
+        include: { customer: true },
+        take: 5,
+        orderBy: { dueDate: 'asc' },
+      }),
+      // 13. Pending quotations
+      prisma.quotation.count({
+        where: { status: { in: ['DRAFT', 'SENT'] } },
       }),
     ]);
 
@@ -84,7 +133,6 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
 
     // Financial calculation 2: Outstanding Balance = remaining unpaid invoice amounts accounting for partial payments
     const outstandingBalance = invoicesAll.reduce((sum, inv) => {
-      // If balanceAmount is explicitly tracked in DB, use it; otherwise totalAmount - paidAmount
       const total = Number(inv.totalAmount || 0);
       const paid = Number(inv.paidAmount || 0);
       const remaining = inv.balanceAmount != null ? Number(inv.balanceAmount) : Math.max(0, total - paid);
@@ -97,13 +145,29 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       ...recentPayments.map((p) => ({
         id: `pay-${p.id}`,
         type: 'PAYMENT',
-        title: `Payment Received`,
+        title: `Payment Received (${p.paymentNumber || 'Direct'})`,
         reference: p.paymentNumber || p.id.slice(0, 8),
         customerName: p.customer?.name || 'Customer',
-        description: `Verified collection of $${Number(p.amount).toFixed(2)} from ${p.customer?.name || 'Subscriber'}`,
+        description: `Collected for invoice ${p.invoice?.invoiceNumber || 'Billing'} from ${p.customer?.name || 'Customer'}`,
         status: p.status,
         amount: Number(p.amount),
+        amountPrefix: '+',
         date: p.paidAt,
+      })),
+      ...recentInvoices.map((inv) => ({
+        id: `inv-${inv.id}`,
+        type: 'INVOICE',
+        title: `Invoice ${inv.invoiceNumber}`,
+        reference: inv.invoiceNumber,
+        customerName: inv.customer?.name || 'Customer',
+        description: inv.status === 'PARTIALLY_PAID'
+          ? `Billed $${Number(inv.totalAmount).toFixed(2)} to ${inv.customer?.name} (Unpaid balance: $${Number(inv.balanceAmount || 0).toFixed(2)})`
+          : `Billing invoice issued to ${inv.customer?.name || 'Customer'} (${inv.status})`,
+        status: inv.status,
+        amount: Number(inv.totalAmount || 0),
+        balanceAmount: inv.balanceAmount != null ? Number(inv.balanceAmount) : 0,
+        amountPrefix: '',
+        date: inv.issueDate || inv.createdAt,
       })),
       ...recentSubscriptions.map((s) => ({
         id: `sub-${s.id}`,
@@ -114,18 +178,8 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
         description: `Active recurring plan for ${s.customer?.name || 'Customer'} (${s.status})`,
         status: s.status,
         amount: s.totalAmount != null ? Number(s.totalAmount) : null,
+        amountPrefix: '',
         date: s.createdAt,
-      })),
-      ...recentInvoices.map((inv) => ({
-        id: `inv-${inv.id}`,
-        type: 'INVOICE',
-        title: `Invoice ${inv.invoiceNumber}`,
-        reference: inv.invoiceNumber,
-        customerName: inv.customer?.name || 'Customer',
-        description: `Billing invoice issued to ${inv.customer?.name || 'Customer'} (${inv.status})`,
-        status: inv.status,
-        amount: inv.totalAmount != null ? Number(inv.totalAmount) : null,
-        date: inv.issueDate || inv.createdAt,
       })),
     ];
 
@@ -200,6 +254,11 @@ router.get('/dashboard-metrics', authenticateToken, authorizeRoles('ADMIN', 'STA
       monthlyRevenue,
       subscriptionStatusCounts,
       recentActivities: activities,
+      // Operational metrics for Staff dashboard compatibility
+      attentionSubscriptionsCount,
+      dueSoonInvoices,
+      overdueInvoicesList,
+      pendingQuotations,
     });
   } catch (err) {
     next(err);

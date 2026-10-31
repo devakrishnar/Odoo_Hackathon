@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { authenticateToken, authorizeRoles } from '../../middleware/auth.middleware.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import prisma from '../../config/db.js';
+import { quotationsService } from './quotations.service.js';
 
 const router = Router();
 
+// GET all quotations (role-aware: customers see their own, staff/admin see all)
 router.get('/', authenticateToken, async (req, res, next) => {
   try {
     const where = {};
@@ -21,13 +23,24 @@ router.get('/', authenticateToken, async (req, res, next) => {
       },
       orderBy: { createdAt: 'desc' },
     });
+
     return successResponse(res, 'Quotations retrieved successfully', { quotations });
   } catch (err) {
     next(err);
   }
 });
 
-// Customer submits a plan/quotation request
+// GET quotation by ID
+router.get('/:id', authenticateToken, async (req, res, next) => {
+  try {
+    const quotation = await quotationsService.getQuotationById(req.params.id, req.user);
+    return successResponse(res, 'Quotation retrieved successfully', { quotation });
+  } catch (err) {
+    return errorResponse(res, err.message, [], 404);
+  }
+});
+
+// POST /request — Customer submits a self-service quotation request
 router.post('/request', authenticateToken, async (req, res, next) => {
   try {
     const { planId, quantity = 1, notes } = req.body;
@@ -36,10 +49,7 @@ router.post('/request', authenticateToken, async (req, res, next) => {
       return errorResponse(res, 'Plan ID is required', [], 400);
     }
 
-    const customer = await prisma.customer.findFirst({
-      where: { userId: req.user.id },
-    });
-
+    const customer = await prisma.customer.findFirst({ where: { userId: req.user.id } });
     if (!customer) {
       return errorResponse(res, 'Customer record not found for authenticated user', [], 404);
     }
@@ -48,7 +58,6 @@ router.post('/request', authenticateToken, async (req, res, next) => {
       where: { id: planId },
       include: { product: true },
     });
-
     if (!plan) {
       return errorResponse(res, 'Selected plan not found', [], 404);
     }
@@ -57,14 +66,10 @@ router.post('/request', authenticateToken, async (req, res, next) => {
     const unitPrice = Number(plan.price);
     const lineTotal = unitPrice * qty;
 
-    // Assign quotation to first available staff or admin or the user themselves
-    const staffUser = await prisma.user.findFirst({
-      where: { role: { in: ['STAFF', 'ADMIN'] } },
-    });
-
+    const staffUser = await prisma.user.findFirst({ where: { role: { in: ['STAFF', 'ADMIN'] } } });
     const createdById = staffUser ? staffUser.id : req.user.id;
     const quotationNumber = `QT-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
-    const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    const validUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     const quotation = await prisma.quotation.create({
       data: {
@@ -101,7 +106,17 @@ router.post('/request', authenticateToken, async (req, res, next) => {
   }
 });
 
-// Customer accepts an issued quotation
+// POST / — Staff/Admin creates a quotation manually
+router.post('/', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
+  try {
+    const quotation = await quotationsService.createQuotation(req.user.id, req.body);
+    return successResponse(res, 'Quotation created successfully', { quotation }, 201);
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
+
+// POST /:id/accept — Customer accepts an issued quotation
 router.post('/:id/accept', authenticateToken, async (req, res, next) => {
   try {
     const quotation = await prisma.quotation.findUnique({
@@ -120,8 +135,13 @@ router.post('/:id/accept', authenticateToken, async (req, res, next) => {
       }
     }
 
-    if (quotation.status === 'ACCEPTED' || quotation.status === 'CONVERTED') {
-      return errorResponse(res, `Quotation is already ${quotation.status.toLowerCase()}`, [], 400);
+    if (quotation.status !== 'SENT') {
+      return errorResponse(
+        res,
+        `Quotation cannot be accepted because it is currently ${quotation.status}. Only quotations sent by staff can be accepted.`,
+        [],
+        400
+      );
     }
 
     const updated = await prisma.quotation.update({
@@ -135,5 +155,25 @@ router.post('/:id/accept', authenticateToken, async (req, res, next) => {
   }
 });
 
-export default router;
+// POST /:id/confirm — Staff/Admin marks a quotation as accepted
+router.post('/:id/confirm', authenticateToken, async (req, res, next) => {
+  try {
+    const quotation = await quotationsService.updateStatus(req.params.id, 'ACCEPTED', req.user);
+    return successResponse(res, 'Quotation confirmed and accepted', { quotation });
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
 
+// PATCH /:id/status — Staff/Admin updates quotation status
+router.patch('/:id/status', authenticateToken, authorizeRoles('ADMIN', 'STAFF'), async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    const quotation = await quotationsService.updateStatus(req.params.id, status, req.user);
+    return successResponse(res, `Quotation marked as ${status}`, { quotation });
+  } catch (err) {
+    return errorResponse(res, err.message, [], 400);
+  }
+});
+
+export default router;
