@@ -135,7 +135,7 @@ router.post('/:id/accept', authenticateToken, async (req, res, next) => {
       }
     }
 
-    if (quotation.status !== 'SENT') {
+    if (quotation.status !== 'SENT' && quotation.status !== 'ACCEPTED') {
       return errorResponse(
         res,
         `Quotation cannot be accepted because it is currently ${quotation.status}. Only quotations sent by staff can be accepted.`,
@@ -144,12 +144,86 @@ router.post('/:id/accept', authenticateToken, async (req, res, next) => {
       );
     }
 
-    const updated = await prisma.quotation.update({
-      where: { id: quotation.id },
-      data: { status: 'ACCEPTED' },
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Mark quotation as CONVERTED
+      const updatedQuote = await tx.quotation.update({
+        where: { id: quotation.id },
+        data: { status: 'CONVERTED' },
+        include: { items: { include: { plan: { include: { product: true } } } }, customer: true },
+      });
+
+      // 2. Create Active Subscription
+      const startDate = new Date();
+      const nextMonth = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const subscriptionNumber = `SUB-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const subscription = await tx.subscription.create({
+        data: {
+          subscriptionNumber,
+          customerId: quotation.customerId,
+          quotationId: quotation.id,
+          status: 'ACTIVE',
+          startDate,
+          currentPeriodStart: startDate,
+          currentPeriodEnd: nextMonth,
+          autoRenew: true,
+          currency: quotation.currency || 'USD',
+          totalAmount: quotation.totalAmount,
+          items: {
+            create: updatedQuote.items.map((item) => ({
+              planId: item.planId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              taxPercent: item.taxPercent,
+              lineTotal: item.lineTotal,
+            })),
+          },
+        },
+      });
+
+      // 3. Automatically generate the initial Invoice
+      const invoiceNumber = `INV-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const dueDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000);
+
+      const invoice = await tx.invoice.create({
+        data: {
+          invoiceNumber,
+          customerId: quotation.customerId,
+          subscriptionId: subscription.id,
+          status: 'ISSUED',
+          issueDate: new Date(),
+          dueDate,
+          billingPeriodStart: startDate,
+          billingPeriodEnd: nextMonth,
+          subtotal: quotation.totalAmount,
+          taxAmount: quotation.taxAmount || 0.0,
+          discountAmount: quotation.discountAmount || 0.0,
+          totalAmount: quotation.totalAmount,
+          paidAmount: 0.0,
+          balanceAmount: quotation.totalAmount,
+          currency: quotation.currency || 'USD',
+          notes: `Invoice for subscription ${subscription.subscriptionNumber}`,
+          items: {
+            create: updatedQuote.items.map((item) => ({
+              planId: item.planId,
+              description: `${item.plan?.product?.name || 'Product'} - ${item.plan?.name || 'Subscription Plan'}`,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              taxPercent: item.taxPercent,
+              lineTotal: item.lineTotal,
+            })),
+          },
+        },
+      });
+
+      return { quotation: updatedQuote, subscription, invoice };
     });
 
-    return successResponse(res, 'Quotation accepted successfully', { quotation: updated });
+    return successResponse(
+      res,
+      'Quotation accepted, subscription activated, and invoice generated successfully.',
+      result
+    );
   } catch (err) {
     next(err);
   }
