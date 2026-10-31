@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+  { name: 'Browse Plans', path: '/plans', icon: Sparkles },
   { name: 'My Subscriptions', path: '/subscriptions', icon: Repeat },
   { name: 'My Invoices', path: '/invoices', icon: Receipt },
   { name: 'Payment History', path: '/payments', icon: CreditCard },

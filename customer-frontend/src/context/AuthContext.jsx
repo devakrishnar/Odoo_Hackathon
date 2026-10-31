@@ -50,6 +50,36 @@ export const AuthProvider = ({ children }) => {
     return { success: false, message: res.message };
   };
 
+  const register = async (userData) => {
+    const res = await api.post('/auth/register', {
+      ...userData,
+      role: 'CUSTOMER',
+    });
+    return res;
+  };
+
+  const forgotPassword = async (email) => {
+    const res = await api.post('/auth/forgot-password', { email });
+    return res;
+  };
+
+  const resetPassword = async (token, password) => {
+    const res = await api.post('/auth/reset-password', { token, password });
+    return res;
+  };
+
+  const refreshUser = async () => {
+    try {
+      const res = await api.get('/auth/me');
+      if (res.data?.user) {
+        setUser(res.data.user);
+        localStorage.setItem('brightloop_customer_user', JSON.stringify(res.data.user));
+      }
+    } catch (e) {
+      console.warn('Could not refresh user profile:', e);
+    }
+  };
+
   const logout = async () => {
     try {
       if (token) await api.post('/auth/logout');
@@ -64,7 +94,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, isCustomer: user?.role === 'CUSTOMER' }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        login,
+        register,
+        forgotPassword,
+        resetPassword,
+        refreshUser,
+        logout,
+        isCustomer: user?.role === 'CUSTOMER',
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
