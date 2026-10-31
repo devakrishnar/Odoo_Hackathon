@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Globe,
   FileCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
@@ -20,7 +21,7 @@ export const Taxes = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Modal
+  // Edit / Create Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTax, setEditingTax] = useState(null);
   const [formData, setFormData] = useState({
@@ -31,6 +32,10 @@ export const Taxes = () => {
     description: '',
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Custom Confirmation Dialog (instead of browser window.confirm)
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchTaxes = useCallback(async () => {
     setLoading(true);
@@ -82,14 +87,18 @@ export const Taxes = () => {
     }
   };
 
-  const handleDeleteTax = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to delete tax rule "${name}"?`)) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await api.delete(`/taxes/${id}`);
-      toast.success('Tax rule deleted.');
+      await api.delete(`/taxes/${deleteTarget.id}`);
+      toast.success(`Tax rule "${deleteTarget.name}" deleted.`);
+      setDeleteTarget(null);
       fetchTaxes();
     } catch (err) {
       toast.error(err?.message || 'Failed to delete tax rule');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -223,7 +232,7 @@ export const Taxes = () => {
                         <Edit2 className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => handleDeleteTax(t.id, t.name)}
+                        onClick={() => setDeleteTarget(t)}
                         className="p-1.5 border border-slate-200 rounded-lg hover:bg-rose-50 text-rose-600"
                         title="Delete"
                       >
@@ -238,7 +247,40 @@ export const Taxes = () => {
         </div>
       </div>
 
-      {/* Tax Modal */}
+      {/* Custom Clean Confirmation Dialog */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden p-6 text-center">
+            <div className="h-12 w-12 rounded-full bg-rose-50 text-rose-600 mx-auto flex items-center justify-center mb-3">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900">Delete Tax Rule?</h3>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Are you sure you want to remove <strong className="text-slate-800">"{deleteTarget.name}"</strong>? This will permanently delete this tax configuration.
+            </p>
+
+            <div className="flex items-center justify-center space-x-2.5 mt-6">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold shadow-xs transition disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete Tax Rule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tax Edit / Create Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
@@ -340,4 +382,3 @@ export const Taxes = () => {
 };
 
 export default Taxes;
-
