@@ -67,34 +67,8 @@ export const StaffManagement = () => {
   }, []);
 
   useEffect(() => {
-    let ignore = false;
-    const initFetch = async () => {
-      try {
-        const res = await api.get('/users');
-        const users = res?.data?.users || res?.users || [];
-        if (!ignore) {
-          setStaffList(Array.isArray(users) ? users : []);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!ignore) {
-          const serverMessage = err?.response?.data?.message || err?.message;
-          if (!err?.response && (err?.message?.includes('Network Error') || err?.code === 'ERR_NETWORK')) {
-            setError('Cannot connect to backend server. Please verify http://localhost:5000 is running.');
-          } else {
-            setError(serverMessage || 'Failed to load staff accounts from backend.');
-          }
-          setStaffList([]);
-          setLoading(false);
-        }
-      }
-    };
-
-    initFetch();
-    return () => {
-      ignore = true;
-    };
-  }, []);
+    fetchStaff();
+  }, [fetchStaff]);
 
   // Password validation according to the exact problem statement:
   // - More than 8 characters (minimum 9)
