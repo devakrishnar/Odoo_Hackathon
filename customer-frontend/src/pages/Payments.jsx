@@ -78,7 +78,8 @@ export const Payments = () => {
       Number(inv.balanceAmount) > 0 &&
       inv.status !== 'PAID' &&
       inv.status !== 'VOID' &&
-      inv.status !== 'CANCELLED'
+      inv.status !== 'CANCELLED' &&
+      !payments.some((p) => p.invoiceId === inv.id && p.status === 'PENDING')
   );
 
   const handleInvoiceSelect = (id) => {
